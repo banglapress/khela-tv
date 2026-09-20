@@ -1,0 +1,57 @@
+name: KhelaTV AI Desk Auto Draft
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 15 minutes (offset to reduce top-of-the-hour queueing).
+    - cron: "7,22,37,52 * * * *"
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ingest RSS sources
+        env:
+          DESK_CRON_SECRET: ${{ secrets.DESK_CRON_SECRET || secrets.CRON_SECRET }}
+          DESK_URL: https://khelatv.com/api/desk-auto-draft
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DESK_CRON_SECRET:-}" ]; then
+            echo "Missing GitHub repository secret: DESK_CRON_SECRET"
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            --max-time 120 \
+            -H "Authorization: Bearer ${DESK_CRON_SECRET}" \
+            "${DESK_URL}?mode=ingest"
+
+  workers:
+    needs: ingest
+    if: ${{ always() && needs.ingest.result != 'cancelled' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Process one AI Desk story
+        env:
+          DESK_CRON_SECRET: ${{ secrets.DESK_CRON_SECRET || secrets.CRON_SECRET }}
+          DESK_URL: https://khelatv.com/api/desk-auto-draft
+          WORKER_ID: ${{ matrix.worker }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DESK_CRON_SECRET:-}" ]; then
+            echo "Missing GitHub repository secret: DESK_CRON_SECRET"
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            --max-time 300 \
+            -H "Authorization: Bearer ${DESK_CRON_SECRET}" \
+            "${DESK_URL}?mode=worker&limit=1&worker=${WORKER_ID}"
